@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { cookies } from 'next/headers'
 
 export default async function DashboardLayout({
   children,
@@ -14,6 +15,15 @@ export default async function DashboardLayout({
     redirect('/')
   }
 
+  // Persist provider token to cookies if it exists in the current session
+  if (session.provider_token) {
+    cookies().set('fb_provider_token', session.provider_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 60, // 60 days
+    })
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200">
@@ -23,7 +33,7 @@ export default async function DashboardLayout({
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500">
-              {session.user.email}
+              {session.user.email || 'Instagram User'}
             </span>
             <form action="/auth/signout" method="post">
               <button className="text-sm text-gray-600 hover:text-gray-900 font-medium">
