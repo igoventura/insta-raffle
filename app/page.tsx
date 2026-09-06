@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { LoginButton } from '@/components/login-button'
+import Link from 'next/link'
 
 export default async function Home() {
   const supabase = createClient()
@@ -12,8 +13,8 @@ export default async function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24 bg-gradient-to-b from-indigo-50 to-white">
-      <div className="z-10 max-w-5xl w-full items-center justify-center font-mono text-sm flex flex-col text-center space-y-8">
+    <main className="flex min-h-screen flex-col items-center justify-center p-24 bg-gradient-to-b from-indigo-50 to-white relative">
+      <div className="z-10 max-w-5xl w-full items-center justify-center font-mono text-sm flex flex-col text-center space-y-8 flex-1 mt-24">
         <h1 className="text-5xl font-bold tracking-tight text-gray-900">
           Insta-Raffle 🎉
         </h1>
@@ -26,6 +27,12 @@ export default async function Home() {
           <LoginButton />
         </div>
       </div>
+      
+      <footer className="mt-auto pt-12 pb-4 text-sm text-gray-500 w-full text-center">
+        <Link href="/privacy" className="hover:text-gray-900 underline">
+          Política de Privacidade
+        </Link>
+      </footer>
     </main>
   )
 }

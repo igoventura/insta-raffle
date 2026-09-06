@@ -14,10 +14,10 @@ export function LoginButton() {
       provider: 'facebook',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
-        scopes: 'instagram_basic,instagram_manage_comments,pages_show_list,pages_read_engagement'
+        scopes: 'instagram_basic,instagram_manage_comments'
       },
     })
-    
+
     if (error) {
       console.error(error)
       setIsLoading(false)
