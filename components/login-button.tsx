@@ -2,13 +2,27 @@
 
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 export function LoginButton() {
   const [isLoading, setIsLoading] = useState(false)
+  const supabase = createClient()
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setIsLoading(true)
-    window.location.href = "https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=1612669340521588&redirect_uri=https://lukaazvycpenbequfvaz.supabase.co/auth/v1/callback&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights"
+    
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'instagram',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        scopes: 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights'
+      }
+    })
+
+    if (error) {
+      console.error(error)
+      setIsLoading(false)
+    }
   }
 
   return (
