@@ -10,7 +10,7 @@ export function LoginButton() {
     setIsLoading(true)
     const clientId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || '1612669340521588'
     const redirectUri = encodeURIComponent(`${window.location.origin}/auth/callback`)
-    const scopes = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights'
+    const scopes = 'instagram_business_basic,instagram_business_manage_comments'
     
     window.location.href = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scopes}`
   }
