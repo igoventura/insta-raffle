@@ -1,12 +1,13 @@
-import { cookies } from 'next/headers'
+import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { LoginButton } from '@/components/login-button'
 
 export default async function Home() {
-  const token = cookies().get('fb_provider_token')?.value
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
 
   // If user is already logged in, redirect to dashboard
-  if (token) {
+  if (session) {
     redirect('/dashboard')
   }
 
