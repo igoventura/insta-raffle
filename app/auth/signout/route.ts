@@ -1,12 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { clearSessionCookie } from '@/lib/auth/session'
 
 export async function POST(request: Request) {
-  const supabase = createClient()
-  await supabase.auth.signOut()
-  cookies().delete('fb_provider_token')
-  return NextResponse.redirect(new URL('/', request.url), {
+  const { origin } = new URL(request.url)
+  await clearSessionCookie()
+  return NextResponse.redirect(`${origin}/`, {
     status: 302,
   })
 }

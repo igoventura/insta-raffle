@@ -1,57 +1,524 @@
-import { InstagramComment } from '../instagram/api'
+import type { InstagramComment } from '../instagram/api'
+
+export type DisqualificationReason =
+  | 'PAST_DEADLINE'
+  | 'MISSING_KEYWORD'
+  | 'NO_MENTION'
+  | 'MULTIPLE_MENTIONS'
+  | 'SELF_MENTION'
+  | 'HOST_MENTION'
+  | 'BLOCKED_HANDLE'
+  | 'DUPLICATE_TAGGED_FRIEND'
+  | 'EXCEEDED_USER_CAP'
+
+export const ALL_DISQUALIFICATION_REASONS: DisqualificationReason[] = [
+  'PAST_DEADLINE',
+  'MISSING_KEYWORD',
+  'NO_MENTION',
+  'MULTIPLE_MENTIONS',
+  'SELF_MENTION',
+  'HOST_MENTION',
+  'BLOCKED_HANDLE',
+  'DUPLICATE_TAGGED_FRIEND',
+  'EXCEEDED_USER_CAP',
+]
 
 export interface GiveawayRules {
   numWinners: number
-  minMentions: number
-  allowMultipleEntries: boolean
+  numSubstitutes: number
+  maxEntriesPerUser: number
+  hostUsername: string
+  deadlineIso?: string | null
+  requiredKeyword?: string | null
+  blockedHandles?: string[]
 }
 
-export interface GiveawayResult {
-  winners: InstagramComment[]
-  totalValidEntries: number
-  totalCommentsProcessed: number
+export interface QualifiedEntry {
+  id: string
+  username: string
+  commenterHandle: string
+  mentionedHandle: string
+  text: string
+  timestamp: string
+  like_count: number
+  userEntryNumber: number
 }
 
-export function pickWinners(comments: InstagramComment[], rules: GiveawayRules): GiveawayResult {
-  const validEntries: InstagramComment[] = []
-  const userEntryCount = new Map<string, number>()
+export interface DisqualifiedComment {
+  comment: InstagramComment
+  reason: DisqualificationReason
+  extractedMentions: string[]
+}
 
-  // Regex to find @mentions (alphanumeric, underscores, dots)
-  const mentionRegex = /@[\w\.]+/g
+export interface FunnelCounts {
+  totalFetched: number
+  qualifiedEntries: number
+  uniqueEligibleCommenters: number
+  rejectedByReason: Record<DisqualificationReason, number>
+}
 
-  for (const comment of comments) {
-    const mentions = comment.text.match(mentionRegex) || []
-    
-    // Check if it meets the minimum mentions requirement
-    if (mentions.length >= rules.minMentions) {
-      const hasEntered = userEntryCount.has(comment.username)
-      
-      if (!hasEntered || rules.allowMultipleEntries) {
-        validEntries.push(comment)
-        userEntryCount.set(comment.username, (userEntryCount.get(comment.username) || 0) + 1)
+export interface QualificationResult {
+  qualifiedEntries: QualifiedEntry[]
+  disqualifiedComments: DisqualifiedComment[]
+  funnelCounts: FunnelCounts
+  uniqueEligibleCommenters: number
+}
+
+export interface DrawnParticipant {
+  rank: number
+  commentId: string
+  username: string
+  mentionedHandle: string
+  text: string
+  timestamp: string
+}
+
+export interface AtomicDrawOutput {
+  winners: DrawnParticipant[]
+  substitutes: DrawnParticipant[]
+  poolHash: string
+  algorithmVersion: 'hmac-sha256-fy-v1'
+}
+
+/**
+ * Normalizes an Instagram username/handle to lowercase without a leading '@'.
+ */
+export function normalizeHandle(raw: string): string {
+  return raw.trim().toLowerCase().replace(/^@+/, '').replace(/\.+$/, '')
+}
+
+/**
+ * Extracts valid @mentions from comment text.
+ * - Requires start-of-string or a non-word, non-period boundary before '@' (so emails like user@gmail.com are ignored).
+ * - Strips trailing sentence periods (e.g. "Tagging @bob." -> "bob").
+ * - Rejects handles containing consecutive periods ('..') or empty handles.
+ */
+export function extractMentions(text: string): string[] {
+  if (!text) return []
+  const mentionRegex = /(?:^|[^\w.])@([a-zA-Z0-9._]{1,30})(?![a-zA-Z0-9._])/g
+  const results: string[] = []
+  let match: RegExpExecArray | null
+
+  while ((match = mentionRegex.exec(text)) !== null) {
+    const candidate = match[1].replace(/\.+$/, '').toLowerCase()
+    if (
+      candidate.length >= 1 &&
+      candidate.length <= 30 &&
+      !candidate.startsWith('.') &&
+      !candidate.includes('..')
+    ) {
+      results.push(candidate)
+    }
+  }
+
+  return results
+}
+
+function createEmptyRejectionMap(): Record<DisqualificationReason, number> {
+  return {
+    PAST_DEADLINE: 0,
+    MISSING_KEYWORD: 0,
+    NO_MENTION: 0,
+    MULTIPLE_MENTIONS: 0,
+    SELF_MENTION: 0,
+    HOST_MENTION: 0,
+    BLOCKED_HANDLE: 0,
+    DUPLICATE_TAGGED_FRIEND: 0,
+    EXCEEDED_USER_CAP: 0,
+  }
+}
+
+/**
+ * Evaluates raw top-level comments in canonical ascending chronological order
+ * (timestamp ASC, tie-broken by id ASC) against the 9 qualification rules.
+ */
+export function qualifyComments(
+  comments: InstagramComment[],
+  rules: GiveawayRules
+): QualificationResult {
+  const rejectedByReason = createEmptyRejectionMap()
+  const qualifiedEntries: QualifiedEntry[] = []
+  const disqualifiedComments: DisqualifiedComment[] = []
+  const userTaggedFriends = new Map<string, Set<string>>()
+
+  const hostHandle = normalizeHandle(rules.hostUsername || '')
+  const maxCap = Math.max(1, Math.floor(rules.maxEntriesPerUser || 1))
+  const requiredKeywordNormalized = rules.requiredKeyword?.trim().toLowerCase() || ''
+  const deadlineMs =
+    rules.deadlineIso && rules.deadlineIso.trim().length > 0
+      ? new Date(rules.deadlineIso).getTime()
+      : null
+  const hasValidDeadline = deadlineMs !== null && !Number.isNaN(deadlineMs)
+
+  const blockedSet = new Set<string>(
+    (rules.blockedHandles || [])
+      .map((h) => normalizeHandle(h))
+      .filter((h) => h.length > 0)
+  )
+
+  const sortedComments = [...comments].sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime()
+    const timeB = new Date(b.timestamp).getTime()
+    if (!Number.isNaN(timeA) && !Number.isNaN(timeB) && timeA !== timeB) {
+      return timeA - timeB
+    }
+    return String(a.id).localeCompare(String(b.id))
+  })
+
+  for (const comment of sortedComments) {
+    const mentions = extractMentions(comment.text)
+    const commenterHandle = normalizeHandle(comment.username || '')
+
+    const reject = (reason: DisqualificationReason) => {
+      rejectedByReason[reason] += 1
+      disqualifiedComments.push({
+        comment,
+        reason,
+        extractedMentions: mentions,
+      })
+    }
+
+    // Rule 1: Deadline cutoff
+    if (hasValidDeadline) {
+      const commentMs = new Date(comment.timestamp).getTime()
+      if (!Number.isNaN(commentMs) && commentMs > deadlineMs!) {
+        reject('PAST_DEADLINE')
+        continue
       }
     }
+
+    // Rule 2: Required keyword / hashtag
+    if (requiredKeywordNormalized.length > 0) {
+      if (!comment.text.toLowerCase().includes(requiredKeywordNormalized)) {
+        reject('MISSING_KEYWORD')
+        continue
+      }
+    }
+
+    // Rule 3: Must have at least 1 mention
+    if (mentions.length === 0) {
+      reject('NO_MENTION')
+      continue
+    }
+
+    // Rule 4: Strictly 1 mention per comment (2+ mentions discarded)
+    if (mentions.length >= 2) {
+      reject('MULTIPLE_MENTIONS')
+      continue
+    }
+
+    const mentionedHandle = mentions[0]
+
+    // Rule 5: No self-mention
+    if (mentionedHandle === commenterHandle) {
+      reject('SELF_MENTION')
+      continue
+    }
+
+    // Rule 6: No host-mention
+    if (hostHandle.length > 0 && mentionedHandle === hostHandle) {
+      reject('HOST_MENTION')
+      continue
+    }
+
+    // Rule 7: Blocked handle (either commenter or mentioned friend)
+    if (blockedSet.has(commenterHandle) || blockedSet.has(mentionedHandle)) {
+      reject('BLOCKED_HANDLE')
+      continue
+    }
+
+    // Rule 8: Deduplicate tagged friend per commenter across comments
+    let taggedSet = userTaggedFriends.get(commenterHandle)
+    if (!taggedSet) {
+      taggedSet = new Set<string>()
+      userTaggedFriends.set(commenterHandle, taggedSet)
+    }
+
+    if (taggedSet.has(mentionedHandle)) {
+      reject('DUPLICATE_TAGGED_FRIEND')
+      continue
+    }
+
+    // Rule 9: Per-user entry cap
+    if (taggedSet.size >= maxCap) {
+      reject('EXCEEDED_USER_CAP')
+      continue
+    }
+
+    taggedSet.add(mentionedHandle)
+    qualifiedEntries.push({
+      id: comment.id,
+      username: comment.username,
+      commenterHandle,
+      mentionedHandle,
+      text: comment.text,
+      timestamp: comment.timestamp,
+      like_count: comment.like_count,
+      userEntryNumber: taggedSet.size,
+    })
   }
 
-  // Shuffle and pick winners
-  const shuffled = [...validEntries].sort(() => 0.5 - Math.random())
-  
-  // Ensure we pick unique users as winners (even if allowMultipleEntries is true, one user shouldn't win twice in the same draw usually, but for simplicity we just slice. Let's make sure winners are unique users)
-  const winners: InstagramComment[] = []
-  const winningUsernames = new Set<string>()
+  let uniqueEligibleCommenters = 0
+  userTaggedFriends.forEach((set) => {
+    if (set.size > 0) {
+      uniqueEligibleCommenters += 1
+    }
+  })
 
-  for (const entry of shuffled) {
-    if (winners.length >= rules.numWinners) break
-    
-    if (!winningUsernames.has(entry.username)) {
-      winners.push(entry)
-      winningUsernames.add(entry.username)
+  return {
+    qualifiedEntries,
+    disqualifiedComments,
+    funnelCounts: {
+      totalFetched: comments.length,
+      qualifiedEntries: qualifiedEntries.length,
+      uniqueEligibleCommenters,
+      rejectedByReason,
+    },
+    uniqueEligibleCommenters,
+  }
+}
+
+// ============================================================================
+// Pure Isomorphic TypeScript SHA-256 & HMAC-SHA256 (FIPS 180-4 & RFC 2104)
+// Zero Node 'crypto' dependency so this module bundles cleanly in Browser & Server
+// ============================================================================
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+])
+
+function rotr(x: number, n: number): number {
+  return (x >>> n) | (x << (32 - n))
+}
+
+function utf8ToBytes(str: string): Uint8Array {
+  return new TextEncoder().encode(str)
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let hex = ''
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0')
+  }
+  return hex
+}
+
+export function sha256Bytes(data: Uint8Array): Uint8Array {
+  let h0 = 0x6a09e667
+  let h1 = 0xbb67ae85
+  let h2 = 0x3c6ef372
+  let h3 = 0xa54ff53a
+  let h4 = 0x510e527f
+  let h5 = 0x9b05688c
+  let h6 = 0x1f83d9ab
+  let h7 = 0x5be0cd19
+
+  const bitLenHi = Math.floor((data.length * 8) / 0x100000000)
+  const bitLenLo = (data.length * 8) >>> 0
+
+  const padLen = (data.length + 9 + 63) & ~63
+  const padded = new Uint8Array(padLen)
+  padded.set(data)
+  padded[data.length] = 0x80
+
+  const view = new DataView(padded.buffer)
+  view.setUint32(padLen - 8, bitLenHi, false)
+  view.setUint32(padLen - 4, bitLenLo, false)
+
+  const w = new Uint32Array(64)
+
+  for (let offset = 0; offset < padLen; offset += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = view.getUint32(offset + i * 4, false)
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0
+    }
+
+    let a = h0
+    let b = h1
+    let c = h2
+    let d = h3
+    let e = h4
+    let f = h5
+    let g = h6
+    let h = h7
+
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
+      const ch = (e & f) ^ (~e & g)
+      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
+      const maj = (a & b) ^ (a & c) ^ (b & c)
+      const temp2 = (S0 + maj) >>> 0
+
+      h = g
+      g = f
+      f = e
+      e = (d + temp1) >>> 0
+      d = c
+      c = b
+      b = a
+      a = (temp1 + temp2) >>> 0
+    }
+
+    h0 = (h0 + a) >>> 0
+    h1 = (h1 + b) >>> 0
+    h2 = (h2 + c) >>> 0
+    h3 = (h3 + d) >>> 0
+    h4 = (h4 + e) >>> 0
+    h5 = (h5 + f) >>> 0
+    h6 = (h6 + g) >>> 0
+    h7 = (h7 + h) >>> 0
+  }
+
+  const out = new Uint8Array(32)
+  const outView = new DataView(out.buffer)
+  outView.setUint32(0, h0, false)
+  outView.setUint32(4, h1, false)
+  outView.setUint32(8, h2, false)
+  outView.setUint32(12, h3, false)
+  outView.setUint32(16, h4, false)
+  outView.setUint32(20, h5, false)
+  outView.setUint32(24, h6, false)
+  outView.setUint32(28, h7, false)
+  return out
+}
+
+export function sha256Hex(message: string): string {
+  return bytesToHex(sha256Bytes(utf8ToBytes(message)))
+}
+
+export function hmacSha256Hex(key: string, message: string): string {
+  const blockSize = 64
+  let keyBytes = utf8ToBytes(key)
+  if (keyBytes.length > blockSize) {
+    keyBytes = sha256Bytes(keyBytes)
+  }
+
+  const paddedKey = new Uint8Array(blockSize)
+  paddedKey.set(keyBytes)
+
+  const oKeyPad = new Uint8Array(blockSize)
+  const iKeyPad = new Uint8Array(blockSize)
+  for (let i = 0; i < blockSize; i++) {
+    oKeyPad[i] = paddedKey[i] ^ 0x5c
+    iKeyPad[i] = paddedKey[i] ^ 0x36
+  }
+
+  const msgBytes = utf8ToBytes(message)
+  const innerInput = new Uint8Array(blockSize + msgBytes.length)
+  innerInput.set(iKeyPad, 0)
+  innerInput.set(msgBytes, blockSize)
+  const innerHash = sha256Bytes(innerInput)
+
+  const outerInput = new Uint8Array(blockSize + innerHash.length)
+  outerInput.set(oKeyPad, 0)
+  outerInput.set(innerHash, blockSize)
+  return bytesToHex(sha256Bytes(outerInput))
+}
+
+/**
+ * Computes the SHA-256 hex digest of the canonically ordered qualified entry pool.
+ */
+export function computePoolHash(qualifiedEntries: QualifiedEntry[]): string {
+  const canonical = qualifiedEntries.map((e) => ({
+    id: e.id,
+    username: e.commenterHandle,
+    mentionedHandle: e.mentionedHandle,
+    timestamp: e.timestamp,
+  }))
+  return sha256Hex(JSON.stringify(canonical))
+}
+
+/**
+ * Executes a single atomic, cryptographically seeded draw to select N unique winners
+ * and S ordered substitutes without user replacement (Winners ∩ Substitutes = ∅).
+ */
+export function executeAtomicDraw(
+  qualifiedEntries: QualifiedEntry[],
+  rules: GiveawayRules,
+  seedInput: { serverSeed: string; postId: string; attemptNumber: number }
+): AtomicDrawOutput {
+  const poolHash = computePoolHash(qualifiedEntries)
+  const pool = [...qualifiedEntries]
+
+  const numWinners = Math.max(1, Math.floor(rules.numWinners || 1))
+  const numSubstitutes = Math.max(0, Math.floor(rules.numSubstitutes || 0))
+  const totalNeeded = numWinners + numSubstitutes
+
+  let counter = 0
+  for (let i = pool.length - 1; i >= 1; i--) {
+    const range = i + 1
+    const limit = 0x100000000 - (0x100000000 % range)
+    let uint32 = 0
+
+    while (true) {
+      const hmacHex = hmacSha256Hex(
+        seedInput.serverSeed,
+        `${seedInput.postId}:${seedInput.attemptNumber}:${poolHash}:${counter}`
+      )
+      counter += 1
+      uint32 = parseInt(hmacHex.slice(0, 8), 16) >>> 0
+      if (uint32 < limit) {
+        break
+      }
+    }
+
+    const j = uint32 % range
+    const temp = pool[i]
+    pool[i] = pool[j]
+    pool[j] = temp
+  }
+
+  const drawnEntries: QualifiedEntry[] = []
+  const seenUsernames = new Set<string>()
+
+  for (const ticket of pool) {
+    if (drawnEntries.length >= totalNeeded) {
+      break
+    }
+    if (!seenUsernames.has(ticket.commenterHandle)) {
+      seenUsernames.add(ticket.commenterHandle)
+      drawnEntries.push(ticket)
     }
   }
+
+  const winners: DrawnParticipant[] = drawnEntries
+    .slice(0, numWinners)
+    .map((entry, idx) => ({
+      rank: idx + 1,
+      commentId: entry.id,
+      username: entry.username,
+      mentionedHandle: entry.mentionedHandle,
+      text: entry.text,
+      timestamp: entry.timestamp,
+    }))
+
+  const substitutes: DrawnParticipant[] = drawnEntries
+    .slice(numWinners, numWinners + numSubstitutes)
+    .map((entry, idx) => ({
+      rank: idx + 1,
+      commentId: entry.id,
+      username: entry.username,
+      mentionedHandle: entry.mentionedHandle,
+      text: entry.text,
+      timestamp: entry.timestamp,
+    }))
 
   return {
     winners,
-    totalValidEntries: validEntries.length,
-    totalCommentsProcessed: comments.length
+    substitutes,
+    poolHash,
+    algorithmVersion: 'hmac-sha256-fy-v1',
   }
 }

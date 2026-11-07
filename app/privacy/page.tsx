@@ -24,43 +24,44 @@ export default function PrivacyPolicy() {
             <p>
               O Insta-Raffle (&quot;nós&quot;, &quot;nosso&quot;) respeita a sua privacidade e está comprometido em proteger as informações 
               pessoais que você compartilha conosco. Esta Política de Privacidade explica como coletamos, usamos e 
-              compartilhamos informações quando você utiliza nosso aplicativo web para realizar sorteios no Instagram.
+              compartilhamos informações quando você utiliza nosso aplicativo web para realizar sorteios auditáveis no Instagram.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-gray-900 mb-3">2. Dados que Coletamos</h2>
-            <p>Ao utilizar o Insta-Raffle e fazer login através da sua conta do Facebook/Instagram, podemos acessar:</p>
-            <ul className="list-disc pl-6 mt-2 space-y-1">
-              <li>Informações básicas do seu perfil do Instagram (nome, nome de usuário, foto de perfil).</li>
+            <p>Ao utilizar o Insta-Raffle e fazer login através da API oficial do Instagram com Login do Instagram, podemos acessar:</p>
+            <ol className="list-decimal pl-6 mt-2 space-y-1">
+              <li>Informações básicas do seu perfil profissional do Instagram (ID da conta, nome de usuário e foto de perfil).</li>
               <li>Lista de publicações da sua conta do Instagram.</li>
-              <li>Comentários públicos feitos nas publicações que você selecionar para o sorteio.</li>
-            </ul>
+              <li>Comentários públicos de nível superior feitos nas publicações que você selecionar para o sorteio.</li>
+            </ol>
             <p className="mt-2">
-              <strong>Aviso Importante:</strong> Nós não solicitamos, nem armazenamos a sua senha do Facebook ou Instagram. 
-              A autenticação é feita diretamente pelos servidores da Meta de forma segura.
+              <strong>Aviso Importante:</strong> Nós não solicitamos, nem armazenamos a sua senha do Instagram. 
+              A autenticação é feita diretamente pelos servidores oficiais do Instagram (Meta) via OAuth 2.0.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-gray-900 mb-3">3. Como Usamos seus Dados</h2>
             <p>Utilizamos os dados coletados exclusivamente para fornecer o serviço principal do aplicativo:</p>
-            <ul className="list-disc pl-6 mt-2 space-y-1">
-              <li>Exibir suas contas e publicações para que você possa escolher qual post será sorteado.</li>
-              <li>Ler os comentários da publicação escolhida para verificar menções (@) e validar os participantes.</li>
-              <li>Selecionar aleatoriamente o(s) vencedor(es) do seu sorteio.</li>
-            </ul>
+            <ol className="list-decimal pl-6 mt-2 space-y-1">
+              <li>Exibir suas publicações para que você possa escolher qual post será sorteado.</li>
+              <li>Ler os comentários públicos da publicação escolhida para verificar menções (@) e validar os participantes.</li>
+              <li>Selecionar aleatoriamente o(s) vencedor(es) e suplentes do seu sorteio e gerar um certificado público de auditoria imutável.</li>
+            </ol>
             <p className="mt-2">
-              Seus dados de sessão (tokens de acesso) são armazenados localmente em cookies seguros (HTTP-only) no seu navegador para manter a sua sessão ativa.
+              Seus dados de sessão (tokens de acesso) são armazenados localmente em cookies criptografados (AES-256-GCM, HTTP-only) no seu navegador para manter a sua sessão ativa.
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">4. Compartilhamento de Dados</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">4. Compartilhamento e Armazenamento de Dados</h2>
             <p>
-              Nós não vendemos, alugamos ou compartilhamos seus dados pessoais com terceiros. As únicas trocas de informações 
-              ocorrem diretamente entre o nosso aplicativo e as APIs oficiais da Meta (Facebook/Instagram Graph API) e nosso 
-              provedor de autenticação (Supabase).
+              Nós não vendemos, alugamos ou compartilhamos seus dados pessoais com terceiros para fins comerciais. As únicas trocas de informações 
+              ocorrem diretamente entre o nosso aplicativo, a API oficial do Instagram (<code>graph.instagram.com</code>) e o nosso 
+              banco de dados de certificados de auditoria no Google Firebase (Cloud Firestore), onde são gravados apenas o resumo estatístico do sorteio, 
+              as regras aplicadas e os comentários vencedores/suplentes para verificação pública em <code>/verify/[drawId]</code>.
             </p>
           </section>
 
@@ -68,9 +69,8 @@ export default function PrivacyPolicy() {
             <h2 className="text-xl font-semibold text-gray-900 mb-3">5. Exclusão de Dados</h2>
             <p>
               Você pode revogar o acesso do Insta-Raffle à sua conta a qualquer momento diretamente nas configurações 
-              de &quot;Aplicativos e Sites&quot; do seu Facebook ou Instagram. Como nosso aplicativo não armazena os dados dos 
-              seus comentários ou posts em um banco de dados permanente, ao sair (logout) ou revogar o acesso, nós 
-              perdemos imediatamente qualquer acesso futuro às suas informações.
+              de &quot;Aplicativos e Sites&quot; do seu Instagram. Como nosso aplicativo não armazena a lista bruta de todos os comentários 
+              dos seus posts em banco de dados permanente, ao sair (logout) ou revogar o acesso, seu cookie de sessão é removido imediatamente.
             </p>
           </section>
 

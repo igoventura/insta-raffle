@@ -8,7 +8,7 @@
 
 ## Overview
 
-Insta-Raffle is a web application built with Next.js 14 and Firebase that enables Instagram Business and Creator account owners to run verifiable, rule-based comment raffles on their Instagram posts. Using the official Instagram API with Instagram Login (`graph.instagram.com`), the application fetches top-level comments on a post, filters them through deterministic qualification rules (requiring a single valid `@mention` per comment, deduplicating tagged friends per commenter up to a per-user entry cap, and enforcing deadline, keyword, and blocklist filters), and executes an atomic, cryptographically seeded draw to select $N$ unique winners and $S$ ordered substitutes. Every executed draw increments an append-only attempt counter for the post and produces a permanent, shareable verification page (`/verify/[drawId]`).
+Insta-Raffle is a web application built with Next.js 16 (React 19) and Firebase that enables Instagram Business and Creator account owners to run verifiable, rule-based comment raffles on their Instagram posts. Using the official Instagram API with Instagram Login (`graph.instagram.com`), the application fetches top-level comments on a post, filters them through deterministic qualification rules (requiring a single valid `@mention` per comment, deduplicating tagged friends per commenter up to a per-user entry cap, and enforcing deadline, keyword, and blocklist filters), and executes an atomic, cryptographically seeded draw to select $N$ unique winners and $S$ ordered substitutes. Every executed draw increments an append-only attempt counter for the post and produces a permanent, shareable verification page (`/verify/[drawId]`).
 
 ## The Problem
 
@@ -90,7 +90,7 @@ The application separates interactive browser state (rule configuration and live
                     |                                   |  comments + syncToken)
                     v                                   v
 +-----------------------------------------------------------------------------------+
-|                             Next.js 14 Server Runtime                             |
+|                             Next.js 16 Server Runtime                             |
 |                                                                                   |
 |  1. Auth & Snapshot Signing Layer (lib/auth/session.ts)                           |
 |     a. AES-256-GCM encrypted httpOnly cookie (insta_raffle_session)               |
@@ -275,12 +275,12 @@ The implementation is partitioned into three sequential, buildable phases so tha
 #### 1. [`../../package.json`](../../package.json) and [`../../package-lock.json`](../../package-lock.json) (Modify)
 
 1. **Type / Scope**: Package Manifest and Dependency Graph
-2. **Rationale and Proposed Changes**: Remove legacy Supabase dependencies (`@supabase/ssr`, `@supabase/supabase-js`), add `firebase-admin` for server-side Firestore transactions, add `vitest` as a devDependency, and add `"test": "vitest run"` to `scripts` so the pure qualification and draw engine can be unit-tested independently.
+2. **Rationale and Proposed Changes**: Upgrade `next` and `eslint-config-next` from `14.2.35` to `^16.0.0` and upgrade `react`, `react-dom`, `@types/react`, and `@types/react-dom` from `18` to `^19.0.0`. Remove legacy Supabase dependencies (`@supabase/ssr`, `@supabase/supabase-js`), add `firebase-admin` for server-side Firestore transactions, add `vitest` as a devDependency, and add `"test": "vitest run"` to `scripts` so the pure qualification and draw engine can be unit-tested independently.
 
 #### 2. [`../../lib/giveaway/logic.ts`](../../lib/giveaway/logic.ts) (Modify)
 
 1. **Type / Scope**: Pure Isomorphic Domain Qualification and Cryptographic Draw Engine
-2. **Rationale and Proposed Changes**: Replace the biased `.sort(() => 0.5 - Math.random())` implementation with pure, zero-I/O, zero-Node-`crypto` deterministic functions (using pure TypeScript SHA-256 and HMAC-SHA256 implementations so importing `@/lib/giveaway/logic` inside `'use client'` components never triggers Next.js Webpack `crypto` bundling errors):
+2. **Rationale and Proposed Changes**: Replace the biased `.sort(() => 0.5 - Math.random())` implementation with pure, zero-I/O, zero-Node-`crypto` deterministic functions (using pure TypeScript SHA-256 and HMAC-SHA256 implementations so importing `@/lib/giveaway/logic` inside `'use client'` components never triggers Next.js 16 client bundling errors):
    a. `DisqualificationReason` union type (`'PAST_DEADLINE' | 'MISSING_KEYWORD' | 'NO_MENTION' | 'MULTIPLE_MENTIONS' | 'SELF_MENTION' | 'HOST_MENTION' | 'BLOCKED_HANDLE' | 'DUPLICATE_TAGGED_FRIEND' | 'EXCEEDED_USER_CAP'`).
    b. `GiveawayRules` interface (`numWinners: number`, `numSubstitutes: number`, `maxEntriesPerUser: number`, `hostUsername: string`, `deadlineIso?: string | null`, `requiredKeyword?: string | null`, `blockedHandles?: string[]`).
    c. `normalizeHandle(raw: string): string` (`raw.trim().toLowerCase().replace(/^@/, '')`) and `extractMentions(text: string): string[]` using `/(?:^|[^\w.])@([a-zA-Z0-9._]{1,30})(?![a-zA-Z0-9._])/g`, stripping trailing sentence periods (`replace(/\.+$/, '')`) and rejecting handles with consecutive periods (`..`) or email addresses (`user@domain.com`).
@@ -321,7 +321,7 @@ The implementation is partitioned into three sequential, buildable phases so tha
    a. `SessionPayload` interface (`accessToken: string`, `igUserId: string`, `username: string`, `name: string`, `profilePictureUrl: string`, `expiresAt: number`, `isMock?: boolean`).
    b. Derive the 32-byte encryption key via `crypto.createHash('sha256').update(process.env.SESSION_SECRET || 'dev-fallback-insta-raffle-session-secret').digest()` (throwing in production if `SESSION_SECRET` is unset).
    c. `encryptSession(payload: SessionPayload): string` and `decryptSession(token: string): SessionPayload | null` using Node `crypto` AES-256-GCM.
-   d. `getSession(): Promise<SessionPayload | null>`, `setSessionCookie(payload: SessionPayload): void`, and `clearSessionCookie(): void`.
+   d. `getSession(): Promise<SessionPayload | null>`, `setSessionCookie(payload: SessionPayload): Promise<void>`, and `clearSessionCookie(): Promise<void>` using Next.js 16 asynchronous `await cookies()` from `next/headers`.
    e. `signCommentSnapshot(mediaId: string, isComplete: boolean, comments: InstagramComment[]): string` and `verifyCommentSnapshot(mediaId: string, isComplete: boolean, comments: InstagramComment[], syncToken: string): boolean` using `crypto.createHmac('sha256', derivedKey)` and `crypto.timingSafeEqual`.
 
 #### 5. [`../../lib/instagram/api.ts`](../../lib/instagram/api.ts) (Modify)
@@ -406,12 +406,12 @@ The implementation is partitioned into three sequential, buildable phases so tha
 #### 17. [`../../app/dashboard/post/[postId]/page.tsx`](../../app/dashboard/post/[postId]/page.tsx) (Create)
 
 1. **Type / Scope**: Raffle Configuration and Execution Page Server Component
-2. **Rationale and Proposed Changes**: Load post metadata (`getPostDetails`), paginate top-level comments (`getPostComments`), sign the synced comment snapshot via `signCommentSnapshot(params.postId, syncResult.isComplete, syncResult.comments)`, load current `PostDrawMetadata` (`drawAttemptCount` and `attempts`) from `lib/firebase/admin.ts`, and render `GiveawayEngine`.
+2. **Rationale and Proposed Changes**: Accept Next.js 16 asynchronous `params: Promise<{ postId: string }>` (`const { postId } = await params`), load post metadata (`getPostDetails`), paginate top-level comments (`getPostComments`), sign the synced comment snapshot via `signCommentSnapshot(postId, syncResult.isComplete, syncResult.comments)`, load current `PostDrawMetadata` (`drawAttemptCount` and `attempts`) from `lib/firebase/admin.ts`, and render `GiveawayEngine`.
 
 #### 18. [`../../app/verify/[drawId]/page.tsx`](../../app/verify/[drawId]/page.tsx) (Create)
 
 1. **Type / Scope**: Public Audit Verification Page Server Component
-2. **Rationale and Proposed Changes**: Fetch `getDrawAuditSnapshot(params.drawId)` and render a tamper-evident public certificate showing:
+2. **Rationale and Proposed Changes**: Accept Next.js 16 asynchronous `params: Promise<{ drawId: string }>` (`const { drawId } = await params`), fetch `getDrawAuditSnapshot(drawId)`, and render a tamper-evident public certificate showing:
    a. Post permalink, owner `@username`, execution timestamp, and an `Official Draw Attempt #K` badge.
    b. Links and timestamps for any prior attempts (`#1 .. #K-1`) on the same post.
    c. Frozen rule configuration (`numWinners`, `numSubstitutes`, `maxEntriesPerUser`, `deadlineIso`, `requiredKeyword`, blocked handle count).

@@ -1,27 +1,44 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
+import {
+  OAUTH_STATE_COOKIE_NAME,
+  setSessionCookie,
+} from '@/lib/auth/session'
+import {
+  exchangeInstagramCode,
+  getInstagramProfile,
+} from '@/lib/instagram/api'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
+  const state = searchParams.get('state')
   const next = searchParams.get('next') ?? '/dashboard'
 
-  if (code) {
-    const supabase = createClient()
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      if (data.session?.provider_token) {
-        cookies().set('fb_provider_token', data.session.provider_token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          maxAge: 60 * 60 * 24 * 60, // 60 days
-          path: '/'
-        })
-      }
-      return NextResponse.redirect(`${origin}${next}`)
-    }
+  const cookieStore = await cookies()
+  const savedState = cookieStore.get(OAUTH_STATE_COOKIE_NAME)?.value
+  cookieStore.delete(OAUTH_STATE_COOKIE_NAME)
+
+  if (!code || !state || !savedState || state !== savedState) {
+    return NextResponse.redirect(`${origin}/?error=InvalidOAuthState`)
   }
 
-  return NextResponse.redirect(`${origin}/?error=AuthFailed`)
+  try {
+    const tokenData = await exchangeInstagramCode(code)
+    const profile = await getInstagramProfile(tokenData.accessToken)
+
+    await setSessionCookie({
+      accessToken: tokenData.accessToken,
+      igUserId: profile.id || tokenData.userId,
+      username: profile.username,
+      name: profile.name,
+      profilePictureUrl: profile.profile_picture_url,
+      expiresAt: Date.now() + tokenData.expiresIn * 1000,
+      isMock: false,
+    })
+
+    return NextResponse.redirect(`${origin}${next}`)
+  } catch {
+    return NextResponse.redirect(`${origin}/?error=AuthFailed`)
+  }
 }

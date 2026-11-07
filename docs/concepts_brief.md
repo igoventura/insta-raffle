@@ -47,7 +47,7 @@ Insta-Raffle is a Next.js and Firebase web application that lets Instagram Busin
    b. Parse `@mentions` using strict Instagram username rules (`1-30` characters of `[a-zA-Z0-9._]`, preceded by start-of-string or non-word boundary so email addresses like `user@gmail.com` are ignored, and stripping trailing sentence punctuation like `@friend.` or `@friend!`).
    c. Enforce chronological sorting (`timestamp ASC`, `id ASC`) before running the single-pass qualification filter so that a user's *first* valid comment tagging `@bob` is accepted, any subsequent comment by that user tagging `@bob` is rejected as `DUPLICATE_TAGGED_FRIEND`, and valid entries beyond `maxEntriesPerUser` are rejected as `EXCEEDED_USER_CAP`.
 4. **Weighted Draw Without User Replacement**: Each qualified comment is one ticket in the pool (up to `maxEntriesPerUser` tickets per user). During the single atomic draw of $N + S$ slots, whenever a ticket is selected, that commenter claims the current winner or substitute slot and any remaining tickets belonging to that same `username` are skipped for the rest of the draw, guaranteeing that all $N$ winners and $S$ substitutes are distinct individuals (`Winners ∩ Substitutes = ∅`).
-5. **Restore `_old/` to Root and Strip Legacy Dependencies**: Restore the existing Next.js 14, Tailwind, and `shadcn/ui` project structure from `_old/` back to the repository root rather than scaffolding from scratch, then remove `@supabase/*` and `graph.facebook.com` assumptions and install `firebase-admin`.
+5. **Restore `_old/` to Root, Upgrade to Next.js 16, and Strip Legacy Dependencies**: Restore the existing Next.js, Tailwind, and `shadcn/ui` project structure from `_old/` back to the repository root rather than scaffolding from scratch, upgrade `next` to `^16.0.0` (with React 19), remove `@supabase/*` and `graph.facebook.com` assumptions, and install `firebase-admin`.
 
 ## Goals vs. Non-Goals
 
@@ -64,7 +64,7 @@ Insta-Raffle is a Next.js and Firebase web application that lets Instagram Busin
    d. Provide a **Dry-Run Qualification Preview** displaying total comments, qualified entries, unique eligible commenters, and a breakdown of disqualified comments by exact rejection reason before running the official draw.
    e. Execute a server-side atomic draw (`firebase-admin` transaction with idempotency protection) using a deterministic cryptographic shuffle to select $N$ unique winners and $S$ ordered substitutes in draw order.
    f. Persist an immutable, schema-versioned `DrawAuditSnapshot` and increment the post's `drawAttemptCount` in Firestore, exposing a shareable public verification page (`/verify/[drawId]`).
-   g. Restore the Next.js 14 + Tailwind + `shadcn/ui` project from `_old/` to the root directory, reusing its UI primitives, dashboard layout, and privacy policy page while replacing Supabase and Facebook Login with Firebase (`firebase-admin`) and Instagram Login.
+   g. Restore the Next.js + Tailwind + `shadcn/ui` project from `_old/` to the root directory, upgrading to Next.js 16 (React 19) and reusing its UI primitives, dashboard layout, and privacy policy page while replacing Supabase and Facebook Login with Firebase (`firebase-admin`) and Instagram Login.
 
 2. **Out-of-Scope Non-Goals:**
    a. Fetching or qualifying nested comment replies (`/{ig-comment-id}/replies`).

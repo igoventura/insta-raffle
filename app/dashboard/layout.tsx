@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { getSession } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
@@ -7,8 +7,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const session = await getSession()
 
   if (!session) {
     redirect('/')
@@ -22,8 +21,13 @@ export default async function DashboardLayout({
             Insta-Raffle
           </Link>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">
-              {session.user?.email || 'Instagram User'}
+            {session.isMock && (
+              <span className="text-xs font-medium bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full">
+                Demo Mode
+              </span>
+            )}
+            <span className="text-sm text-gray-600 font-medium">
+              @{session.username}
             </span>
             <form action="/auth/signout" method="post">
               <button className="text-sm text-gray-600 hover:text-gray-900 font-medium">

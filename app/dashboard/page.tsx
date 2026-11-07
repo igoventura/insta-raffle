@@ -1,70 +1,80 @@
-import { cookies } from 'next/headers'
-import { getInstagramAccounts } from '@/lib/instagram/api'
+import { getSession } from '@/lib/auth/session'
+import { getInstagramPosts, InstagramPost } from '@/lib/instagram/api'
 import { Card, CardContent } from '@/components/ui/card'
 import Link from 'next/link'
-import { AlertCircle } from 'lucide-react'
+import { redirect } from 'next/navigation'
+import { AlertCircle, Image as ImageIcon, MessageSquare } from 'lucide-react'
 
 export default async function DashboardPage() {
-  const fbToken = cookies().get('fb_provider_token')?.value
-  
-  // MOCK DATA FALLBACK FOR DEVELOPMENT / DEMO
-  let accounts: import('@/lib/instagram/api').InstagramAccount[] = []
+  const session = await getSession()
+  if (!session) {
+    redirect('/')
+  }
+
+  let posts: InstagramPost[] = []
   let errorMsg = ''
 
-  if (!fbToken) {
-    // We don't have the token, let's show mock data so the UI can be tested
-    accounts = [
-      { id: '12345', username: 'mock_business', name: 'Mock Business Account', profile_picture_url: '' },
-      { id: '67890', username: 'mock_creator', name: 'Mock Creator Account', profile_picture_url: '' }
-    ]
-    errorMsg = "Development Mode: Showing mock accounts because no Facebook Access Token was found."
-  } else {
-    try {
-      accounts = await getInstagramAccounts(fbToken)
-    } catch {
-      errorMsg = "Failed to fetch accounts from Instagram. Showing mock data."
-      accounts = [
-        { id: '12345', username: 'mock_business', name: 'Mock Business Account', profile_picture_url: '' }
-      ]
-    }
+  try {
+    posts = await getInstagramPosts(session.accessToken)
+  } catch (err) {
+    errorMsg =
+      err instanceof Error
+        ? err.message
+        : 'Failed to fetch posts from Instagram.'
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Select Account</h1>
-        <p className="text-gray-500 mt-2">Choose an Instagram account to run the giveaway on.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Select Post</h1>
+        <p className="text-gray-500 mt-2">
+          Choose a post from @{session.username} to configure rules and draw giveaway winners.
+        </p>
       </div>
 
       {errorMsg && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-yellow-600" />
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-md p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
           <p className="text-sm">{errorMsg}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {accounts.map(account => (
-          <Link href={`/dashboard/${account.id}`} key={account.id}>
-            <Card className="hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer h-full">
-              <CardContent className="p-6 flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                  {account.profile_picture_url ? (
-                    <img src={account.profile_picture_url} alt={account.username} className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-2xl text-gray-400">📷</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-2">
+        {posts.map(post => (
+          <Link href={`/dashboard/post/${post.id}`} key={post.id}>
+            <Card className="hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer h-full flex flex-col overflow-hidden">
+              <div className="aspect-square bg-gray-100 flex items-center justify-center relative">
+                {post.media_url || post.thumbnail_url ? (
+                  <img
+                    src={post.thumbnail_url || post.media_url}
+                    alt="Post media"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <ImageIcon className="w-12 h-12 text-gray-300" />
+                )}
+              </div>
+              <CardContent className="p-4 flex-1 flex flex-col">
+                <p className="text-sm text-gray-700 line-clamp-3 mb-3 flex-1">
+                  {post.caption || 'No caption'}
+                </p>
+                <div className="flex items-center justify-between text-xs text-gray-500 mt-auto pt-2 border-t border-gray-100">
+                  <span>{new Date(post.timestamp).toLocaleDateString()}</span>
+                  {typeof post.comments_count === 'number' && (
+                    <span className="flex items-center gap-1 font-medium text-indigo-600">
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      {post.comments_count}
+                    </span>
                   )}
-                </div>
-                <div>
-                  <h3 className="font-semibold text-lg">{account.name}</h3>
-                  <p className="text-gray-500">@{account.username}</p>
                 </div>
               </CardContent>
             </Card>
           </Link>
         ))}
-        {accounts.length === 0 && (
-          <p className="text-gray-500 col-span-full">No Instagram Business accounts found linked to your Facebook pages.</p>
+        {posts.length === 0 && !errorMsg && (
+          <p className="text-gray-500 col-span-full">
+            No posts found for @{session.username}.
+          </p>
         )}
       </div>
     </div>
