@@ -15,7 +15,7 @@ export default async function DashboardPage() {
   let errorMsg = ''
 
   try {
-    posts = await getInstagramPosts(session.accessToken)
+    posts = await getInstagramPosts(session.accessToken, session.igUserId)
   } catch (err) {
     errorMsg =
       err instanceof Error

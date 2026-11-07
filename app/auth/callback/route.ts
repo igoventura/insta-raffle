@@ -11,6 +11,7 @@ import {
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || origin).replace(/\/$/, '')
   const code = searchParams.get('code')
   const state = searchParams.get('state')
   const next = searchParams.get('next') ?? '/dashboard'
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
   cookieStore.delete(OAUTH_STATE_COOKIE_NAME)
 
   if (!code || !state || !savedState || state !== savedState) {
-    return NextResponse.redirect(`${origin}/?error=InvalidOAuthState`)
+    return NextResponse.redirect(`${baseUrl}/?error=InvalidOAuthState`)
   }
 
   try {
@@ -37,8 +38,8 @@ export async function GET(request: Request) {
       isMock: false,
     })
 
-    return NextResponse.redirect(`${origin}${next}`)
+    return NextResponse.redirect(`${baseUrl}${next}`)
   } catch {
-    return NextResponse.redirect(`${origin}/?error=AuthFailed`)
+    return NextResponse.redirect(`${baseUrl}/?error=AuthFailed`)
   }
 }

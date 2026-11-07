@@ -1,7 +1,12 @@
 const IG_OAUTH_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
 const IG_GRAPH_URL = 'https://graph.instagram.com/v21.0'
 const IG_LONG_LIVED_TOKEN_URL = 'https://graph.instagram.com/access_token'
+const FB_GRAPH_URL = 'https://graph.facebook.com/v21.0'
 const MAX_COMMENT_PAGES = 100
+
+function getGraphBaseUrl(): string {
+  return process.env.INSTAGRAM_CONFIG_ID ? FB_GRAPH_URL : IG_GRAPH_URL
+}
 
 export const MOCK_ACCESS_TOKEN = 'mock_access_token'
 
@@ -234,8 +239,9 @@ export function getMockComments(mediaId: string): InstagramComment[] {
 }
 
 /**
- * 1. Exchange Instagram OAuth authorization code for a short-lived token,
- *    then exchange for a 60-day long-lived token via graph.instagram.com.
+ * 1. Exchange OAuth authorization code for a short-lived token,
+ *    then exchange for a 60-day long-lived token. Supports both Meta Unified Login
+ *    (when INSTAGRAM_CONFIG_ID is set) and direct Instagram Login.
  */
 export async function exchangeInstagramCode(code: string): Promise<{
   accessToken: string
@@ -244,8 +250,51 @@ export async function exchangeInstagramCode(code: string): Promise<{
 }> {
   const clientId = process.env.INSTAGRAM_CLIENT_ID || ''
   const clientSecret = process.env.INSTAGRAM_CLIENT_SECRET || ''
+  const configId = process.env.INSTAGRAM_CONFIG_ID
   const redirectUri =
-    process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:3000/auth/callback'
+    process.env.INSTAGRAM_REDIRECT_URI ||
+    `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`
+
+  if (configId) {
+    const tokenParams = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      code,
+    })
+    const shortRes = await fetch(
+      `${FB_GRAPH_URL}/oauth/access_token?${tokenParams.toString()}`
+    )
+    if (!shortRes.ok) {
+      throw new Error('Failed to exchange Unified Login authorization code')
+    }
+    const shortData = await shortRes.json()
+    const shortToken: string = shortData.access_token
+
+    const longParams = new URLSearchParams({
+      grant_type: 'fb_exchange_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      fb_exchange_token: shortToken,
+    })
+    const longRes = await fetch(
+      `${FB_GRAPH_URL}/oauth/access_token?${longParams.toString()}`
+    )
+    if (longRes.ok) {
+      const longData = await longRes.json()
+      return {
+        accessToken: longData.access_token || shortToken,
+        userId: '',
+        expiresIn: Number(longData.expires_in) || 60 * 60 * 24 * 60,
+      }
+    }
+
+    return {
+      accessToken: shortToken,
+      userId: '',
+      expiresIn: Number(shortData.expires_in) || 3600,
+    }
+  }
 
   const formData = new URLSearchParams({
     client_id: clientId,
@@ -295,13 +344,37 @@ export async function exchangeInstagramCode(code: string): Promise<{
 }
 
 /**
- * 2. Fetch the authenticated Instagram Business/Creator profile via /me.
+ * 2. Fetch the authenticated Instagram Business/Creator profile.
+ *    Supports both Meta Unified Login (/me/accounts -> instagram_business_account)
+ *    and direct Instagram Login (/me).
  */
 export async function getInstagramProfile(
   accessToken: string
 ): Promise<InstagramAccount> {
   if (accessToken === MOCK_ACCESS_TOKEN) {
     return getMockProfile()
+  }
+
+  if (process.env.INSTAGRAM_CONFIG_ID) {
+    const pagesRes = await fetch(
+      `${FB_GRAPH_URL}/me/accounts?fields=id,name,instagram_business_account{id,username,name,profile_picture_url}&access_token=${encodeURIComponent(accessToken)}`
+    )
+    if (pagesRes.ok) {
+      const pagesData = await pagesRes.json()
+      const pageWithIg = (pagesData.data || []).find(
+        (p: { instagram_business_account?: InstagramAccount }) =>
+          p.instagram_business_account
+      )
+      if (pageWithIg?.instagram_business_account) {
+        const ig = pageWithIg.instagram_business_account
+        return {
+          id: String(ig.id),
+          username: String(ig.username || ''),
+          name: String(ig.name || ig.username || 'Instagram Creator'),
+          profile_picture_url: String(ig.profile_picture_url || ''),
+        }
+      }
+    }
   }
 
   const res = await fetch(
@@ -321,17 +394,24 @@ export async function getInstagramProfile(
 }
 
 /**
- * 3. Get recent posts for the authenticated Instagram account (/me/media).
+ * 3. Get recent posts for the authenticated Instagram account.
  */
 export async function getInstagramPosts(
-  accessToken: string
+  accessToken: string,
+  igUserId?: string
 ): Promise<InstagramPost[]> {
   if (accessToken === MOCK_ACCESS_TOKEN) {
     return getMockPosts()
   }
 
+  const baseUrl = getGraphBaseUrl()
+  const targetNode =
+    process.env.INSTAGRAM_CONFIG_ID && igUserId
+      ? encodeURIComponent(igUserId)
+      : 'me'
+
   const res = await fetch(
-    `${IG_GRAPH_URL}/me/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count,username&limit=24&access_token=${encodeURIComponent(accessToken)}`
+    `${baseUrl}/${targetNode}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count,username&limit=24&access_token=${encodeURIComponent(accessToken)}`
   )
   if (!res.ok) {
     throw new Error('Failed to fetch Instagram posts')
@@ -353,8 +433,9 @@ export async function getPostDetails(
     return found || getMockPosts()[0]
   }
 
+  const baseUrl = getGraphBaseUrl()
   const res = await fetch(
-    `${IG_GRAPH_URL}/${encodeURIComponent(mediaId)}?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count,username&access_token=${encodeURIComponent(accessToken)}`
+    `${baseUrl}/${encodeURIComponent(mediaId)}?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count,username&access_token=${encodeURIComponent(accessToken)}`
   )
   if (!res.ok) {
     throw new Error('Failed to fetch Instagram post details')
@@ -382,9 +463,10 @@ export async function getPostComments(
     }
   }
 
+  const baseUrl = getGraphBaseUrl()
   let comments: InstagramComment[] = []
   let url: string | null =
-    `${IG_GRAPH_URL}/${encodeURIComponent(mediaId)}/comments?fields=id,text,username,timestamp,like_count&limit=50&access_token=${encodeURIComponent(accessToken)}`
+    `${baseUrl}/${encodeURIComponent(mediaId)}/comments?fields=id,text,username,timestamp,like_count&limit=50&access_token=${encodeURIComponent(accessToken)}`
   let pagesFetched = 0
 
   while (url && pagesFetched < MAX_COMMENT_PAGES) {
