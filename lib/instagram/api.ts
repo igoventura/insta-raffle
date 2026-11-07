@@ -1,4 +1,4 @@
-const GRAPH_URL = 'https://graph.facebook.com/v19.0'
+const GRAPH_URL = 'https://graph.facebook.com/v26.0'
 
 export interface InstagramAccount {
   id: string
@@ -31,7 +31,7 @@ export interface InstagramComment {
 export async function getInstagramAccounts(accessToken: string): Promise<InstagramAccount[]> {
   const res = await fetch(`${GRAPH_URL}/me/accounts?fields=instagram_business_account{id,username,profile_picture_url,name}&access_token=${accessToken}`)
   if (!res.ok) throw new Error('Failed to fetch Facebook pages')
-  
+
   const data = await res.json()
   const accounts: InstagramAccount[] = []
 
@@ -55,7 +55,7 @@ export async function getInstagramAccounts(accessToken: string): Promise<Instagr
 export async function getInstagramPosts(igAccountId: string, accessToken: string): Promise<InstagramPost[]> {
   const res = await fetch(`${GRAPH_URL}/${igAccountId}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp&limit=20&access_token=${accessToken}`)
   if (!res.ok) throw new Error('Failed to fetch posts')
-  
+
   const data = await res.json()
   return data.data
 }
@@ -70,7 +70,7 @@ export async function getPostComments(mediaId: string, accessToken: string): Pro
   while (url) {
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to fetch comments')
-    
+
     const data = await res.json()
     if (data.data) {
       comments = comments.concat(data.data)

@@ -1,0 +1,19 @@
+### What this proposes
+
+This document proposes re-architecting Insta-Raffle into a verifiable Instagram comment giveaway application using Next.js 14, the official Instagram API with Instagram Login (`api.instagram.com` / `graph.instagram.com`), and Cloud Firestore (`firebase-admin`). Hosts authenticate directly with their Instagram Business or Creator account (stored in an AES-256-GCM encrypted `httpOnly` cookie), paginate all top-level comments on a post, and preview deterministic 9-rule qualification results in real time before executing a draw. When the host triggers an official draw (`POST /api/draws`), the server runs an atomic Firestore transaction that increments the post's `drawAttemptCount`, performs an unbiased HMAC-SHA256-seeded Fisher-Yates shuffle to pick $N$ unique winners and $S$ ordered substitutes without user replacement, and saves an immutable `DrawAuditSnapshot` (< 50 KB) exposed at a public verification route (`/verify/[drawId]`).
+
+### How the existing system works, per this document
+
+According to the document, the existing prototype uses Supabase Auth (`@supabase/ssr`, `@supabase/supabase-js`) with Facebook Login (`graph.facebook.com/v26.0/me/accounts`), which forces creators to link their Instagram account to a Facebook Page and route through an intermediate account selection screen (`/dashboard/[accountId]`). However, account discovery fails silently because the prototype omits the `pages_show_list` and `pages_read_engagement` OAuth scopes, and the post-level raffle route (`/dashboard/[accountId]/post/[postId]`) was never implemented. Furthermore, its comment filtering relies on a naive regular expression (`/@[\w\.]+/g`) that permits self-tags, host-tags, multi-mention stuffing, and duplicate friend tags, and its winner selection runs in browser memory using a biased `.sort(() => 0.5 - Math.random())` shuffle with no server-side persistence, substitute ordering, or re-roll tracking.
+
+--------------------------------------------------------------------------------
+
+### Comprehension Findings
+
+1. **Severity**: Nit
+   a. **Affected Scope**: Technical Plan §5 (`Firestore Data Model and Atomic Persistence`, lines 173–195) and Detailed Implementation Plan §18 (`app/dashboard/post/[postId]/page.tsx`, line 380)
+   b. **Discrepancy Description & Rationale**: Section 5.1 defines the `posts/{mediaId}` document fields as `{ mediaId: string, ownerUsername: string, drawAttemptCount: number, lastDrawId: string, lastDrawnAt: string }`. However, Section 5.2's `DrawAuditSnapshot` includes `priorAttempts: Array<{ drawId: string, attemptNumber: number, executedAt: string }>`, Section 5.3 states that the transaction reads `posts/{mediaId}` and checks whether an existing draw already matches `idempotencyKey`, and Detailed Plan §18 states `PostDrawMetadata` loads "prior attempt history". A fresh reader cannot tell whether `posts/{mediaId}` also stores an `attempts` summary array and `lastIdempotencyKey` inline on the document, or whether the transaction queries the `draws` collection by `mediaId` / `idempotencyKey`.
+
+2. **Severity**: Nit
+   a. **Affected Scope**: Technical Plan §4.3 (`Cryptographically Seeded Weighted Draw Without User Replacement`, line 167)
+   b. **Discrepancy Description & Rationale**: Line 167 specifies deriving each Fisher-Yates swap index $j \in [0, i]$ "via rejection sampling over `HMAC-SHA256(serverSeed, "${postId}:${attemptNumber}:${poolHash}:${counter}")`", which is clear at a high level, but does not state how many bytes (for example, an unsigned 32-bit integer `readUInt32BE(0)`) are read from each 32-byte HMAC digest or how `counter` increments when a sample is rejected vs. accepted. Specifying the integer width and counter progression would make independent third-party verification of `hmac-sha256-fy-v1` completely unambiguous.
