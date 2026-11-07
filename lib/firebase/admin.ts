@@ -77,25 +77,29 @@ function getFirestoreInstance(): Firestore | null {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
 
-  if (!projectId || !clientEmail || !privateKey) {
-    return null
-  }
-
-  let app: App
   const existing = getApps()
   if (existing.length > 0) {
-    app = existing[0]
-  } else {
-    app = initializeApp({
+    return getFirestore(existing[0])
+  }
+
+  if (projectId && clientEmail && privateKey) {
+    const app: App = initializeApp({
       credential: cert({
         projectId,
         clientEmail,
         privateKey,
       }),
     })
+    return getFirestore(app)
   }
 
-  return getFirestore(app)
+  // On Firebase App Hosting / Cloud Run, use built-in Application Default Credentials
+  if (process.env.FIREBASE_CONFIG || process.env.K_SERVICE) {
+    const app: App = initializeApp()
+    return getFirestore(app)
+  }
+
+  return null
 }
 
 // ============================================================================

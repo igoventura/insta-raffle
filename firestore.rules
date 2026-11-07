@@ -1,7 +1,19 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All reads and writes are executed exclusively on the server via firebase-admin.
+    // Public read-only audit certificates; writes occur strictly via Firebase Admin SDK
+    match /draws/{drawId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Post attempt metadata managed strictly via Firebase Admin SDK
+    match /posts/{mediaId} {
+      allow read, write: if false;
+    }
+
+    // Deny all other client access
     match /{document=**} {
       allow read, write: if false;
     }
